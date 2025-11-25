@@ -293,9 +293,3 @@ client.on('interactionCreate', async interaction => {
 
 // Botを起動
 client.login(TOKEN);
-```
-
-**③ `.gitignore` を作成**
-```
-node_modules/
-.env
