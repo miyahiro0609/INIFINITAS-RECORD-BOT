@@ -1,10 +1,20 @@
 const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder } = require('discord.js');
 const { REST } = require('@discordjs/rest');
 const { Routes } = require('discord-api-types/v10');
+const { Pool } = require('pg');
 
 // 環境変数から取得
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
+const DATABASE_URL = process.env.DATABASE_URL;
+
+// PostgreSQL接続設定
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
 
 const CLEAR_TYPES = [
   'FAILED',
@@ -24,8 +34,32 @@ for (let i = 0.7; i <= 1.5; i += 0.1) {
   SPEEDS.push({ name: `${Math.round(i * 10) / 10}x`, value: `${Math.round(i * 10) / 10}` });
 }
 
-// スコアデータを保存（メモリ上）
-const records = new Map();
+// データベーステーブルを初期化
+async function initDatabase() {
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS records (
+        id SERIAL PRIMARY KEY,
+        user_id VARCHAR(255) NOT NULL,
+        username VARCHAR(255) NOT NULL,
+        song VARCHAR(255) NOT NULL,
+        difficulty VARCHAR(50) NOT NULL,
+        speed DECIMAL(2,1) NOT NULL,
+        score INTEGER NOT NULL,
+        miss_count INTEGER NOT NULL,
+        clear_type VARCHAR(50) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, song, difficulty, speed)
+      )
+    `);
+    console.log('データベーステーブルを初期化しました');
+  } catch (error) {
+    console.error('データベース初期化エラー:', error);
+  } finally {
+    client.release();
+  }
+}
 
 // スラッシュコマンドの定義
 const commands = [
@@ -101,18 +135,23 @@ const commands = [
   new SlashCommandBuilder()
     .setName('list')
     .setDescription('全記録を表示します')
+    .addIntegerOption(option =>
+      option.setName('limit')
+        .setDescription('表示件数（デフォルト: 10）')
+        .setMinValue(1)
+        .setMaxValue(25)),
+
+  new SlashCommandBuilder()
+    .setName('stats')
+    .setDescription('統計情報を表示します')
 ].map(command => command.toJSON());
 
 // ヘルパー関数
-function getRecordKey(userId, song, difficulty, speed) {
-  return `${userId}__${song}__${difficulty}__${speed}`;
-}
-
 function isBetterRecord(newRec, oldRec) {
   if (!oldRec) return true;
   
   const newClearIdx = CLEAR_TYPES.indexOf(newRec.clearType);
-  const oldClearIdx = CLEAR_TYPES.indexOf(oldRec.clearType);
+  const oldClearIdx = CLEAR_TYPES.indexOf(oldRec.clear_type);
   
   if (newClearIdx > oldClearIdx) return true;
   if (newClearIdx < oldClearIdx) return false;
@@ -120,7 +159,7 @@ function isBetterRecord(newRec, oldRec) {
   if (newRec.score > oldRec.score) return true;
   if (newRec.score < oldRec.score) return false;
   
-  return newRec.missCount < oldRec.missCount;
+  return newRec.missCount < oldRec.miss_count;
 }
 
 function getClearTypeEmoji(type) {
@@ -155,6 +194,9 @@ const client = new Client({
 client.once('ready', async () => {
   console.log(`${client.user.tag} でログインしました！`);
   
+  // データベース初期化
+  await initDatabase();
+  
   // コマンド登録
   const rest = new REST({ version: '10' }).setToken(TOKEN);
   try {
@@ -179,29 +221,40 @@ client.on('interactionCreate', async interaction => {
     if (commandName === 'record') {
       const song = interaction.options.getString('song');
       const difficulty = interaction.options.getString('difficulty');
-      const speed = interaction.options.getString('speed');
+      const speed = parseFloat(interaction.options.getString('speed'));
       const score = interaction.options.getInteger('score');
       const missCount = interaction.options.getInteger('miss');
       const clearType = interaction.options.getString('clear');
 
-      const key = getRecordKey(user.id, song, difficulty, speed);
+      // 既存の記録を取得
+      const existingQuery = await pool.query(
+        'SELECT * FROM records WHERE user_id = $1 AND song = $2 AND difficulty = $3 AND speed = $4',
+        [user.id, song, difficulty, speed]
+      );
+
       const newRecord = {
+        userId: user.id,
+        username: user.username,
         song,
         difficulty,
-        speed: parseFloat(speed),
+        speed,
         score,
         missCount,
-        clearType,
-        date: new Date().toISOString(),
-        userId: user.id,
-        username: user.username
+        clearType
       };
 
-      const existingRecord = records.get(key);
+      const existingRecord = existingQuery.rows[0];
       const isNewBest = isBetterRecord(newRecord, existingRecord);
 
       if (isNewBest) {
-        records.set(key, newRecord);
+        // レコードを挿入または更新
+        await pool.query(
+          `INSERT INTO records (user_id, username, song, difficulty, speed, score, miss_count, clear_type)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           ON CONFLICT (user_id, song, difficulty, speed)
+           DO UPDATE SET score = $6, miss_count = $7, clear_type = $8, username = $2, created_at = CURRENT_TIMESTAMP`,
+          [user.id, user.username, song, difficulty, speed, score, missCount, clearType]
+        );
       }
 
       const embed = new EmbedBuilder()
@@ -223,18 +276,22 @@ client.on('interactionCreate', async interaction => {
     } else if (commandName === 'search') {
       const song = interaction.options.getString('song');
       const difficulty = interaction.options.getString('difficulty');
-      const speed = interaction.options.getString('speed');
+      const speed = parseFloat(interaction.options.getString('speed'));
 
-      const key = getRecordKey(user.id, song, difficulty, speed);
-      const record = records.get(key);
+      const result = await pool.query(
+        'SELECT * FROM records WHERE user_id = $1 AND song = $2 AND difficulty = $3 AND speed = $4',
+        [user.id, song, difficulty, speed]
+      );
 
-      if (!record) {
+      if (result.rows.length === 0) {
         await interaction.reply({
           content: '❌ 該当する記録が見つかりませんでした',
           ephemeral: true
         });
         return;
       }
+
+      const record = result.rows[0];
 
       const embed = new EmbedBuilder()
         .setColor(0x00AE86)
@@ -244,21 +301,23 @@ client.on('interactionCreate', async interaction => {
           { name: '難易度', value: `${getDifficultyEmoji(record.difficulty)} ${record.difficulty}`, inline: true },
           { name: '速度', value: `${record.speed}x`, inline: true },
           { name: 'スコア', value: record.score.toLocaleString(), inline: true },
-          { name: 'ミス', value: record.missCount.toString(), inline: true },
-          { name: 'クリア', value: `${getClearTypeEmoji(record.clearType)} ${record.clearType}`, inline: true }
+          { name: 'ミス', value: record.miss_count.toString(), inline: true },
+          { name: 'クリア', value: `${getClearTypeEmoji(record.clear_type)} ${record.clear_type}`, inline: true }
         )
-        .setTimestamp(new Date(record.date))
+        .setTimestamp(new Date(record.created_at))
         .setFooter({ text: `記録者: ${record.username}` });
 
       await interaction.reply({ embeds: [embed] });
 
     } else if (commandName === 'list') {
-      const userRecords = Array.from(records.values())
-        .filter(r => r.userId === user.id)
-        .sort((a, b) => new Date(b.date) - new Date(a.date))
-        .slice(0, 10);
+      const limit = interaction.options.getInteger('limit') || 10;
 
-      if (userRecords.length === 0) {
+      const result = await pool.query(
+        'SELECT * FROM records WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
+        [user.id, limit]
+      );
+
+      if (result.rows.length === 0) {
         await interaction.reply({
           content: 'まだ記録がありません',
           ephemeral: true
@@ -268,12 +327,47 @@ client.on('interactionCreate', async interaction => {
 
       const embed = new EmbedBuilder()
         .setColor(0x5865F2)
-        .setTitle('📊 あなたの記録一覧（最新10件）')
+        .setTitle(`📊 あなたの記録一覧（最新${limit}件）`)
         .setDescription(
-          userRecords.map((r, i) => 
+          result.rows.map((r, i) => 
             `**${i + 1}.** ${r.song}\n` +
-            `${getDifficultyEmoji(r.difficulty)} ${r.difficulty} | ${r.speed}x | ${r.score.toLocaleString()}点 | Miss: ${r.missCount} | ${getClearTypeEmoji(r.clearType)} ${r.clearType}`
+            `${getDifficultyEmoji(r.difficulty)} ${r.difficulty} | ${r.speed}x | ${r.score.toLocaleString()}点 | Miss: ${r.miss_count} | ${getClearTypeEmoji(r.clear_type)} ${r.clear_type}`
           ).join('\n\n')
+        )
+        .setTimestamp()
+        .setFooter({ text: user.username });
+
+      await interaction.reply({ embeds: [embed] });
+
+    } else if (commandName === 'stats') {
+      const result = await pool.query(
+        `SELECT 
+          COUNT(*) as total_records,
+          AVG(score)::INTEGER as avg_score,
+          MAX(score) as max_score,
+          SUM(CASE WHEN clear_type = 'FULL COMBO' THEN 1 ELSE 0 END) as full_combos
+         FROM records WHERE user_id = $1`,
+        [user.id]
+      );
+
+      const stats = result.rows[0];
+
+      if (stats.total_records == 0) {
+        await interaction.reply({
+          content: 'まだ記録がありません',
+          ephemeral: true
+        });
+        return;
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor(0xFF6B6B)
+        .setTitle('📈 あなたの統計情報')
+        .addFields(
+          { name: '総記録数', value: stats.total_records.toString(), inline: true },
+          { name: '平均スコア', value: (stats.avg_score || 0).toLocaleString(), inline: true },
+          { name: '最高スコア', value: (stats.max_score || 0).toLocaleString(), inline: true },
+          { name: 'フルコンボ数', value: `⭐ ${stats.full_combos}`, inline: true }
         )
         .setTimestamp()
         .setFooter({ text: user.username });
@@ -282,13 +376,18 @@ client.on('interactionCreate', async interaction => {
     }
   } catch (error) {
     console.error('コマンド処理エラー:', error);
-    if (!interaction.replied) {
+    if (!interaction.replied && !interaction.deferred) {
       await interaction.reply({
         content: 'エラーが発生しました',
         ephemeral: true
       });
     }
   }
+});
+
+// エラーハンドリング
+process.on('unhandledRejection', error => {
+  console.error('Unhandled promise rejection:', error);
 });
 
 // Botを起動
