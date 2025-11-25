@@ -73,7 +73,7 @@ async function initDatabase() {
   try {
     console.log('テーブル作成クエリを実行中...');
     await client.query(`
-      CREATE TABLE IF NOT EXISTS records (
+      CREATE TABLE IF NOT EXISTS score_records (
         id SERIAL PRIMARY KEY,
         user_id VARCHAR(255) NOT NULL,
         username VARCHAR(255) NOT NULL,
@@ -264,7 +264,7 @@ client.on('interactionCreate', async interaction => {
 
       // 既存の記録を取得
       const existingQuery = await pool.query(
-        'SELECT * FROM records WHERE user_id = $1 AND song = $2 AND difficulty = $3 AND speed = $4',
+        'SELECT * FROM score_records WHERE user_id = $1 AND song = $2 AND difficulty = $3 AND speed = $4',
         [user.id, song, difficulty, speed]
       );
 
@@ -285,7 +285,7 @@ client.on('interactionCreate', async interaction => {
       if (isNewBest) {
         // レコードを挿入または更新
         await pool.query(
-          `INSERT INTO records (user_id, username, song, difficulty, speed, score, miss_count, clear_type)
+          `INSERT INTO score_records (user_id, username, song, difficulty, speed, score, miss_count, clear_type)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            ON CONFLICT (user_id, song, difficulty, speed)
            DO UPDATE SET score = $6, miss_count = $7, clear_type = $8, username = $2, created_at = CURRENT_TIMESTAMP`,
@@ -315,7 +315,7 @@ client.on('interactionCreate', async interaction => {
       const speed = parseFloat(interaction.options.getString('speed'));
 
       const result = await pool.query(
-        'SELECT * FROM records WHERE user_id = $1 AND song = $2 AND difficulty = $3 AND speed = $4',
+        'SELECT * FROM score_records WHERE user_id = $1 AND song = $2 AND difficulty = $3 AND speed = $4',
         [user.id, song, difficulty, speed]
       );
 
@@ -349,7 +349,7 @@ client.on('interactionCreate', async interaction => {
       const limit = interaction.options.getInteger('limit') || 10;
 
       const result = await pool.query(
-        'SELECT * FROM records WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
+        'SELECT * FROM score_records WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
         [user.id, limit]
       );
 
@@ -382,7 +382,7 @@ client.on('interactionCreate', async interaction => {
           AVG(score)::INTEGER as avg_score,
           MAX(score) as max_score,
           SUM(CASE WHEN clear_type = 'FULL COMBO' THEN 1 ELSE 0 END) as full_combos
-         FROM records WHERE user_id = $1`,
+         FROM score_records WHERE user_id = $1`,
         [user.id]
       );
 
