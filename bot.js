@@ -8,7 +8,7 @@ const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const DATABASE_URL = process.env.DATABASE_URL;
 
-// デバッグ用ログ（本番環境では削除推奨）
+// デバッグ用ログ
 console.log('=== 環境変数チェック ===');
 console.log('TOKEN:', TOKEN ? '設定済み ✓' : '未設定 ✗');
 console.log('CLIENT_ID:', CLIENT_ID ? '設定済み ✓' : '未設定 ✗');
@@ -28,9 +28,9 @@ if (!CLIENT_ID) {
 
 if (!DATABASE_URL) {
   console.error('❌ エラー: DATABASE_URL環境変数が設定されていません');
-  console.error('Railway.appのVariablesタブでDATABASE_URLを設定してください');
   process.exit(1);
 }
+
 console.log('✅ 環境変数の確認完了');
 
 // PostgreSQL接続設定
@@ -41,7 +41,6 @@ const pool = new Pool({
   }
 });
 
-// 接続テスト
 pool.on('error', (err) => {
   console.error('❌ データベース接続エラー:', err);
 });
@@ -226,29 +225,45 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-// Bot起動時
+// Bot起動時（1回のみ定義）
 client.once('ready', async () => {
-  console.log(`${client.user.tag} でログインしました！`);
+  console.log(`✅ ${client.user.tag} でログインしました！`);
   
-  // データベース初期化
-  await initDatabase();
+  try {
+    // データベース初期化
+    console.log('データベース初期化を開始...');
+    await initDatabase();
+    console.log('✅ データベース初期化完了');
+  } catch (error) {
+    console.error('❌ データベース初期化エラー:', error);
+    console.error('エラー詳細:', error.stack);
+  }
   
   // コマンド登録
   const rest = new REST({ version: '10' }).setToken(TOKEN);
   try {
     console.log('スラッシュコマンドを登録中...');
-    await rest.put(
+    console.log('登録するコマンド数:', commands.length);
+    
+    const data = await rest.put(
       Routes.applicationCommands(CLIENT_ID),
       { body: commands },
     );
-    console.log('スラッシュコマンドの登録完了！');
+    
+    console.log(`✅ ${data.length}個のスラッシュコマンドを登録しました！`);
+    console.log('登録されたコマンド:', data.map(cmd => cmd.name).join(', '));
   } catch (error) {
-    console.error('コマンド登録エラー:', error);
+    console.error('❌ コマンド登録エラー:', error);
+    if (error.rawError) {
+      console.error('詳細:', JSON.stringify(error.rawError, null, 2));
+    }
   }
 });
 
 // コマンド処理
 client.on('interactionCreate', async interaction => {
+  console.log('インタラクション受信:', interaction.commandName, 'from', interaction.user.tag);
+  
   if (!interaction.isChatInputCommand()) return;
 
   const { commandName, user } = interaction;
@@ -283,7 +298,6 @@ client.on('interactionCreate', async interaction => {
       const isNewBest = isBetterRecord(newRecord, existingRecord);
 
       if (isNewBest) {
-        // レコードを挿入または更新
         await pool.query(
           `INSERT INTO score_records (user_id, username, song, difficulty, speed, score, miss_count, clear_type)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -411,52 +425,18 @@ client.on('interactionCreate', async interaction => {
       await interaction.reply({ embeds: [embed] });
     }
   } catch (error) {
-    console.error('コマンド処理エラー:', error);
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({
-        content: 'エラーが発生しました',
-        ephemeral: true
-      });
-    }
-  }
-});
-
-// エラーハンドリング
-process.on('unhandledRejection', error => {
-  console.error('Unhandled promise rejection:', error);
-});
-
-// Bot起動時
-client.once('ready', async () => {
-  console.log(`✅ ${client.user.tag} でログインしました！`);
-  
-  try {
-    // データベース初期化
-    console.log('データベース初期化を開始...');
-    await initDatabase();
-    console.log('✅ データベース初期化完了');
-  } catch (error) {
-    console.error('❌ データベース初期化エラー:', error);
+    console.error('❌ コマンド処理エラー:', error);
     console.error('エラー詳細:', error.stack);
-  }
-  
-  // コマンド登録
-  const rest = new REST({ version: '10' }).setToken(TOKEN);
-  try {
-    console.log('スラッシュコマンドを登録中...');
-    console.log('登録するコマンド数:', commands.length);
     
-    const data = await rest.put(
-      Routes.applicationCommands(CLIENT_ID),
-      { body: commands },
-    );
-    
-    console.log(`✅ ${data.length}個のスラッシュコマンドを登録しました！`);
-    console.log('登録されたコマンド:', data.map(cmd => cmd.name).join(', '));
-  } catch (error) {
-    console.error('❌ コマンド登録エラー:', error);
-    if (error.rawError) {
-      console.error('詳細:', JSON.stringify(error.rawError, null, 2));
+    if (!interaction.replied && !interaction.deferred) {
+      try {
+        await interaction.reply({
+          content: '❌ エラーが発生しました',
+          ephemeral: true
+        });
+      } catch (replyError) {
+        console.error('❌ 返信送信エラー:', replyError);
+      }
     }
   }
 });
