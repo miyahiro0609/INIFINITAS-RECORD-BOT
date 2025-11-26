@@ -168,6 +168,29 @@ const commands = [
         .addChoices(...SPEEDS)),
 
   new SlashCommandBuilder()
+    .setName('delete')
+    .setDescription('記録を削除します')
+    .addStringOption(option =>
+      option.setName('song')
+        .setDescription('楽曲名')
+        .setRequired(true))
+    .addStringOption(option =>
+      option.setName('difficulty')
+        .setDescription('難易度')
+        .setRequired(true)
+        .addChoices(
+          { name: 'NORMAL', value: 'NORMAL' },
+          { name: 'HYPER', value: 'HYPER' },
+          { name: 'ANOTHER', value: 'ANOTHER' },
+          { name: 'LEGGENDARIA', value: 'LEGGENDARIA' }
+        ))
+    .addStringOption(option =>
+      option.setName('speed')
+        .setDescription('速度')
+        .setRequired(true)
+        .addChoices(...SPEEDS)),
+
+  new SlashCommandBuilder()
     .setName('list')
     .setDescription('全記録を表示します')
     .addIntegerOption(option =>
@@ -178,7 +201,17 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('stats')
-    .setDescription('統計情報を表示します')
+    .setDescription('統計情報を表示します'),
+
+  new SlashCommandBuilder()
+    .setName('calc')
+    .setDescription('BPMから各速度のBPMを計算します')
+    .addIntegerOption(option =>
+      option.setName('bpm')
+        .setDescription('基準BPM')
+        .setRequired(true)
+        .setMinValue(1)
+        .setMaxValue(999))
 ].map(command => command.toJSON());
 
 // ヘルパー関数
@@ -389,7 +422,7 @@ client.on('interactionCreate', async interaction => {
 
       await interaction.reply({ embeds: [embed] });
 
-    } else if (commandName === 'stats') {
+} else if (commandName === 'stats') {
       const result = await pool.query(
         `SELECT 
           COUNT(*) as total_records,
@@ -423,7 +456,73 @@ client.on('interactionCreate', async interaction => {
         .setFooter({ text: user.username });
 
       await interaction.reply({ embeds: [embed] });
+
+    } else if (commandName === 'delete') {
+      const song = interaction.options.getString('song');
+      const difficulty = interaction.options.getString('difficulty');
+      const speed = parseFloat(interaction.options.getString('speed'));
+
+      // 記録が存在するか確認
+      const checkResult = await pool.query(
+        'SELECT * FROM score_records WHERE user_id = $1 AND song = $2 AND difficulty = $3 AND speed = $4',
+        [user.id, song, difficulty, speed]
+      );
+
+      if (checkResult.rows.length === 0) {
+        await interaction.reply({
+          content: '❌ 該当する記録が見つかりませんでした',
+          ephemeral: true
+        });
+        return;
+      }
+
+      // 記録を削除
+      await pool.query(
+        'DELETE FROM score_records WHERE user_id = $1 AND song = $2 AND difficulty = $3 AND speed = $4',
+        [user.id, song, difficulty, speed]
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor(0xFF0000)
+        .setTitle('🗑️ 記録を削除しました')
+        .setDescription(`**${song}**`)
+        .addFields(
+          { name: '難易度', value: `${getDifficultyEmoji(difficulty)} ${difficulty}`, inline: true },
+          { name: '速度', value: `${speed}x`, inline: true }
+        )
+        .setTimestamp()
+        .setFooter({ text: user.username });
+
+      await interaction.reply({ embeds: [embed] });
+
+    } else if (commandName === 'calc') {
+      const bpm = interaction.options.getInteger('bpm');
+      
+      // 0.7倍から1.5倍まで0.1刻みで計算
+      const speeds = [];
+      for (let i = 0.7; i <= 1.5; i += 0.1) {
+        const speed = Math.round(i * 10) / 10; // 浮動小数点の誤差を修正
+        const calculatedBpm = Math.round(bpm * speed);
+        speeds.push({ speed, bpm: calculatedBpm });
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor(0x00D9FF)
+        .setTitle('🔢 BPM計算結果')
+        .setDescription(`基準BPM: **${bpm}**`)
+        .addFields(
+          speeds.map(s => ({
+            name: `${s.speed}x`,
+            value: `${s.bpm} BPM`,
+            inline: true
+          }))
+        )
+        .setTimestamp()
+        .setFooter({ text: user.username });
+
+      await interaction.reply({ embeds: [embed] });
     }
+
   } catch (error) {
     console.error('❌ コマンド処理エラー:', error);
     console.error('エラー詳細:', error.stack);
