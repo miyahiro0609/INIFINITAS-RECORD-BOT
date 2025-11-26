@@ -59,8 +59,9 @@ const DIFFICULTIES = ['NORMAL', 'HYPER', 'ANOTHER', 'LEGGENDARIA'];
 
 // 速度の選択肢を生成
 const SPEEDS = [];
-for (let i = 0.7; i <= 1.5; i += 0.1) {
-  SPEEDS.push({ name: `${Math.round(i * 10) / 10}x`, value: `${Math.round(i * 10) / 10}` });
+for (let i = 7; i <= 15; i++) {
+  const speed = i / 10;
+  SPEEDS.push({ name: `${speed}x`, value: `${speed}` });
 }
 
 // データベーステーブルを初期化
@@ -495,13 +496,13 @@ client.on('interactionCreate', async interaction => {
 
       await interaction.reply({ embeds: [embed] });
 
-    } else if (commandName === 'calc') {
+} else if (commandName === 'calc') {
       const bpm = interaction.options.getInteger('bpm');
       
-      // 0.7倍から1.5倍まで0.1刻みで計算
+      // 0.7倍から1.5倍まで0.1刻みで計算（修正版）
       const speeds = [];
-      for (let i = 0.7; i <= 1.5; i += 0.1) {
-        const speed = Math.round(i * 10) / 10; // 浮動小数点の誤差を修正
+      for (let i = 7; i <= 15; i++) {
+        const speed = i / 10;
         const calculatedBpm = Math.round(bpm * speed);
         speeds.push({ speed, bpm: calculatedBpm });
       }
