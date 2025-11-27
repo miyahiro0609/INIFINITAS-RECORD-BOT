@@ -3,6 +3,9 @@ const { REST } = require('@discordjs/rest');
 const { Routes } = require('discord-api-types/v10');
 const { Pool } = require('pg');
 
+// バージョン情報
+const BOT_VERSION = '1.1.0';
+
 // 環境変数から取得
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -60,9 +63,12 @@ const DIFFICULTIES = ['NORMAL', 'HYPER', 'ANOTHER', 'LEGGENDARIA'];
 // 速度の選択肢を生成（0.05刻み、0.7から1.5まで）
 const SPEEDS = [];
 for (let i = 14; i <= 30; i++) {
-  const speed = i / 20; // 0.7 = 14/20, 1.5 = 30/20
+  const speed = i / 20;
   SPEEDS.push({ name: `${speed.toFixed(2)}x`, value: `${speed.toFixed(2)}` });
 }
+
+console.log('生成された速度の選択肢:', SPEEDS.length, '個');
+console.log('速度一覧:', SPEEDS.map(s => s.name).join(', '));
 
 // データベーステーブルを初期化
 async function initDatabase() {
@@ -212,7 +218,11 @@ const commands = [
         .setDescription('基準BPM')
         .setRequired(true)
         .setMinValue(1)
-        .setMaxValue(999))
+        .setMaxValue(999)),
+
+  new SlashCommandBuilder()
+    .setName('version')
+    .setDescription('Botのバージョン情報を表示します')
 ].map(command => command.toJSON());
 
 // ヘルパー関数
@@ -520,6 +530,20 @@ client.on('interactionCreate', async interaction => {
     )
     .setTimestamp()
     .setFooter({ text: user.username });
+
+  await interaction.reply({ embeds: [embed] });
+
+} else if (commandName === 'version') {
+  const embed = new EmbedBuilder()
+    .setColor(0x5865F2)
+    .setTitle('ℹ️ Bot情報')
+    .addFields(
+      { name: 'バージョン', value: BOT_VERSION, inline: true },
+      { name: '速度刻み', value: '0.05x (0.70〜1.50)', inline: true },
+      { name: '利用可能なコマンド', value: '8個', inline: true }
+    )
+    .setDescription('音楽ゲームスコア記録Bot')
+    .setTimestamp();
 
   await interaction.reply({ embeds: [embed] });
 }
