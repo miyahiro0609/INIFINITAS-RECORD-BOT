@@ -57,11 +57,11 @@ const CLEAR_TYPES = [
 
 const DIFFICULTIES = ['NORMAL', 'HYPER', 'ANOTHER', 'LEGGENDARIA'];
 
-// 速度の選択肢を生成
+// 速度の選択肢を生成（0.05刻み、0.7から1.5まで）
 const SPEEDS = [];
-for (let i = 7; i <= 15; i++) {
-  const speed = i / 10;
-  SPEEDS.push({ name: `${speed}x`, value: `${speed}` });
+for (let i = 14; i <= 30; i++) {
+  const speed = i / 20; // 0.7 = 14/20, 1.5 = 30/20
+  SPEEDS.push({ name: `${speed.toFixed(2)}x`, value: `${speed.toFixed(2)}` });
 }
 
 // データベーステーブルを初期化
@@ -497,32 +497,32 @@ client.on('interactionCreate', async interaction => {
       await interaction.reply({ embeds: [embed] });
 
 } else if (commandName === 'calc') {
-      const bpm = interaction.options.getInteger('bpm');
-      
-      // 0.7倍から1.5倍まで0.1刻みで計算（修正版）
-      const speeds = [];
-      for (let i = 7; i <= 15; i++) {
-        const speed = i / 10;
-        const calculatedBpm = Math.round(bpm * speed);
-        speeds.push({ speed, bpm: calculatedBpm });
-      }
+  const bpm = interaction.options.getInteger('bpm');
+  
+  // 0.7倍から1.5倍まで0.05刻みで計算
+  const speeds = [];
+  for (let i = 14; i <= 30; i++) {
+    const speed = i / 20;
+    const calculatedBpm = Math.round(bpm * speed);
+    speeds.push({ speed: speed.toFixed(2), bpm: calculatedBpm });
+  }
 
-      const embed = new EmbedBuilder()
-        .setColor(0x00D9FF)
-        .setTitle('🔢 BPM計算結果')
-        .setDescription(`基準BPM: **${bpm}**`)
-        .addFields(
-          speeds.map(s => ({
-            name: `${s.speed}x`,
-            value: `${s.bpm} BPM`,
-            inline: true
-          }))
-        )
-        .setTimestamp()
-        .setFooter({ text: user.username });
+  const embed = new EmbedBuilder()
+    .setColor(0x00D9FF)
+    .setTitle('🔢 BPM計算結果')
+    .setDescription(`基準BPM: **${bpm}**`)
+    .addFields(
+      speeds.map(s => ({
+        name: `${s.speed}x`,
+        value: `${s.bpm} BPM`,
+        inline: true
+      }))
+    )
+    .setTimestamp()
+    .setFooter({ text: user.username });
 
-      await interaction.reply({ embeds: [embed] });
-    }
+  await interaction.reply({ embeds: [embed] });
+}
 
   } catch (error) {
     console.error('❌ コマンド処理エラー:', error);
