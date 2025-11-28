@@ -4,7 +4,7 @@ const { Routes } = require('discord-api-types/v10');
 const { Pool } = require('pg');
 
 // バージョン情報
-const BOT_VERSION = '1.1.0';
+const BOT_VERSION = '1.2.0';
 
 // 環境変数から取得
 const TOKEN = process.env.TOKEN;
@@ -85,7 +85,7 @@ async function initDatabase() {
         username VARCHAR(255) NOT NULL,
         song VARCHAR(255) NOT NULL,
         difficulty VARCHAR(50) NOT NULL,
-        speed DECIMAL(2,1) NOT NULL,
+        speed DECIMAL(3,2) NOT NULL,
         score INTEGER NOT NULL,
         miss_count INTEGER NOT NULL,
         clear_type VARCHAR(50) NOT NULL,
@@ -94,9 +94,24 @@ async function initDatabase() {
       )
     `);
     console.log('✅ テーブル作成/確認完了');
+    
+    // 既存のテーブルがある場合、speedカラムの型を変更
+    console.log('speedカラムの型を確認・変更中...');
+    await client.query(`
+      ALTER TABLE score_records 
+      ALTER COLUMN speed TYPE DECIMAL(3,2)
+    `);
+    console.log('✅ speedカラムの型変更完了');
   } catch (error) {
-    console.error('❌ テーブル作成エラー:', error);
-    throw error;
+    // ALTER TABLEが失敗しても（既に正しい型の場合）続行
+    if (error.code === '42P07' || error.message.includes('already exists')) {
+      console.log('テーブルは既に存在します');
+    } else if (error.message.includes('cannot be cast')) {
+      console.log('⚠️ speedカラムの型変更をスキップ（既存データと互換性なし）');
+    } else {
+      console.error('❌ テーブル作成エラー:', error);
+      throw error;
+    }
   } finally {
     client.release();
     console.log('データベース接続を解放しました');
@@ -286,6 +301,16 @@ client.once('ready', async () => {
   // コマンド登録
   const rest = new REST({ version: '10' }).setToken(TOKEN);
   try {
+    console.log('既存のコマンドを削除中...');
+    await rest.put(
+      Routes.applicationCommands(CLIENT_ID),
+      { body: [] }
+    );
+    console.log('✅ 既存のコマンドを削除しました');
+    
+    // 少し待機
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
     console.log('スラッシュコマンドを登録中...');
     console.log('登録するコマンド数:', commands.length);
     
@@ -296,6 +321,13 @@ client.once('ready', async () => {
     
     console.log(`✅ ${data.length}個のスラッシュコマンドを登録しました！`);
     console.log('登録されたコマンド:', data.map(cmd => cmd.name).join(', '));
+    
+    // 各コマンドの選択肢数を確認
+    data.forEach(cmd => {
+      console.log(`コマンド "${cmd.name}" の選択肢数:`, 
+        cmd.options?.reduce((sum, opt) => sum + (opt.choices?.length || 0), 0) || 0
+      );
+    });
   } catch (error) {
     console.error('❌ コマンド登録エラー:', error);
     if (error.rawError) {
